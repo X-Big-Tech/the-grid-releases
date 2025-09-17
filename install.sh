@@ -113,9 +113,9 @@ install_binary() {
 create_systemd_service() {
     echo -e "${YELLOW}Creating systemd service...${NC}"
 
-    sudo tee /etc/systemd/system/grid-launcher.service > /dev/null << EOF
+    sudo tee /etc/systemd/system/grid-node.service > /dev/null << EOF
 [Unit]
-Description=The Grid - Proof of Network Launcher
+Description=The Grid - Proof of Network Node
 After=network.target
 StartLimitBurst=5
 StartLimitIntervalSec=0
@@ -126,11 +126,11 @@ Restart=always
 RestartSec=5
 User=grid
 Group=grid
-ExecStart=${INSTALL_DIR}/grid-launcher
+ExecStart=${INSTALL_DIR}/grid-node --daemon --config-file=/var/lib/the-grid/config.json
 WorkingDirectory=/var/lib/the-grid
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=the-grid
+SyslogIdentifier=grid-node
 
 [Install]
 WantedBy=multi-user.target
@@ -146,27 +146,29 @@ EOF
 
     # Enable service
     sudo systemctl daemon-reload
-    sudo systemctl enable grid-launcher
+    sudo systemctl enable grid-node
 
     echo -e "${GREEN}✓ Systemd service created${NC}"
-    echo -e "${YELLOW}  Start with: sudo systemctl start grid-launcher${NC}"
-    echo -e "${YELLOW}  Status: sudo systemctl status grid-launcher${NC}"
+    echo -e "${YELLOW}  Start with: sudo systemctl start grid-node${NC}"
+    echo -e "${YELLOW}  Status: sudo systemctl status grid-node${NC}"
 }
 
 # Create launchd service (macOS)
 create_launchd_service() {
     echo -e "${YELLOW}Creating launchd service...${NC}"
 
-    sudo tee /Library/LaunchDaemons/grid.launcher.plist > /dev/null << EOF
+    sudo tee /Library/LaunchDaemons/grid.node.plist > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>grid.launcher</string>
+    <string>grid.node</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${INSTALL_DIR}/grid-launcher</string>
+        <string>${INSTALL_DIR}/grid-node</string>
+        <string>--daemon</string>
+        <string>--config-file=/usr/local/var/the-grid/config.json</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/usr/local/var/the-grid</string>
@@ -187,11 +189,11 @@ EOF
     sudo mkdir -p /usr/local/var/log
 
     # Load service
-    sudo launchctl load /Library/LaunchDaemons/grid.launcher.plist
+    sudo launchctl load /Library/LaunchDaemons/grid.node.plist
 
     echo -e "${GREEN}✓ Launchd service created${NC}"
-    echo -e "${YELLOW}  Start with: sudo launchctl start grid.launcher${NC}"
-    echo -e "${YELLOW}  Stop with: sudo launchctl stop grid.launcher${NC}"
+    echo -e "${YELLOW}  Start with: sudo launchctl start grid.node${NC}"
+    echo -e "${YELLOW}  Stop with: sudo launchctl stop grid.node${NC}"
 }
 
 # Main installation function
