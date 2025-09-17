@@ -73,7 +73,7 @@ install_binary() {
 
     # Parse release JSON to find download URL
     local download_url
-    download_url=$(grep -o "\"browser_download_url\":\"[^\"]*${expected_filename}[^\"]*\"" "${TEMP_DIR}/release.json" | cut -d'"' -f4 | head -1)
+    download_url=$(grep "browser_download_url" "${TEMP_DIR}/release.json" | grep "${expected_filename}.tar.gz" | cut -d'"' -f4 | head -1)
 
     if [ -z "$download_url" ]; then
         echo -e "${RED}Error: No binary found for ${OS}-${ARCH}${NC}"
