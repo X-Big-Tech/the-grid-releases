@@ -113,7 +113,7 @@ install_binary() {
 create_systemd_service() {
     echo -e "${YELLOW}Creating systemd service...${NC}"
 
-    sudo tee /etc/systemd/system/the-grid.service > /dev/null << EOF
+    sudo tee /etc/systemd/system/grid-launcher.service > /dev/null << EOF
 [Unit]
 Description=The Grid - Proof of Network Launcher
 After=network.target
@@ -146,11 +146,11 @@ EOF
 
     # Enable service
     sudo systemctl daemon-reload
-    sudo systemctl enable the-grid
+    sudo systemctl enable grid-launcher
 
     echo -e "${GREEN}✓ Systemd service created${NC}"
-    echo -e "${YELLOW}  Start with: sudo systemctl start the-grid${NC}"
-    echo -e "${YELLOW}  Status: sudo systemctl status the-grid${NC}"
+    echo -e "${YELLOW}  Start with: sudo systemctl start grid-launcher${NC}"
+    echo -e "${YELLOW}  Status: sudo systemctl status grid-launcher${NC}"
 }
 
 # Create launchd service (macOS)
