@@ -82,14 +82,21 @@ install_binary() {
         exit 1
     fi
 
-    # Download binary
+    # Download binary archive
     echo "  Downloading from: ${download_url}"
-    if ! curl -L "$download_url" -o "${TEMP_DIR}/${binary_name}"; then
+    if ! curl -L "$download_url" -o "${TEMP_DIR}/${binary_name}.tar.gz"; then
         echo -e "${RED}Error: Failed to download ${binary_name}${NC}"
         exit 1
     fi
 
-    # Make executable and install
+    # Extract binary from archive
+    echo "  Extracting ${binary_name}..."
+    if ! tar -xzf "${TEMP_DIR}/${binary_name}.tar.gz" -C "${TEMP_DIR}/"; then
+        echo -e "${RED}Error: Failed to extract ${binary_name}${NC}"
+        exit 1
+    fi
+
+    # Make executable
     chmod +x "${TEMP_DIR}/${binary_name}"
 
     echo "  Installing to ${INSTALL_DIR}/${binary_name}"
