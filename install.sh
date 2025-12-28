@@ -34,6 +34,7 @@ detect_os_arch() {
             ;;
         *)
             echo -e "${RED}Error: Unsupported operating system $(uname -s)${NC}"
+            echo -e "${YELLOW}Windows users: Download from https://github.com/X-Big-Tech/the-grid-releases/releases${NC}"
             exit 1
             ;;
     esac
@@ -42,10 +43,7 @@ detect_os_arch() {
         x86_64)
             ARCH="amd64"
             ;;
-        arm64)
-            ARCH="arm64"
-            ;;
-        aarch64)
+        arm64|aarch64)
             ARCH="arm64"
             ;;
         *)
@@ -60,25 +58,26 @@ detect_os_arch() {
 # Download and install binary
 install_binary() {
     local binary_name="$1"
-    local expected_filename="${binary_name}-${OS}-${ARCH}"
+    local platform_suffix="${OS}-${ARCH}"
 
     echo -e "${YELLOW}Downloading ${binary_name}...${NC}"
 
     # Get latest release info
     if ! curl -s "$REPO_URL" -o "${TEMP_DIR}/release.json"; then
         echo -e "${RED}Error: Failed to fetch release information${NC}"
-        echo -e "${YELLOW}Note: No releases available yet.${NC}"
         exit 1
     fi
 
-    # Parse release JSON to find download URL
+    # Find download URL matching pattern: grid-launcher-VERSION-linux-amd64.tar.gz
     local download_url
-    download_url=$(grep "browser_download_url" "${TEMP_DIR}/release.json" | grep "${expected_filename}.tar.gz" | cut -d'"' -f4 | head -1)
+    download_url=$(grep "browser_download_url" "${TEMP_DIR}/release.json" | \
+                   grep "${binary_name}-.*-${platform_suffix}.tar.gz" | \
+                   cut -d'"' -f4 | head -1)
 
     if [ -z "$download_url" ]; then
-        echo -e "${RED}Error: No binary found for ${OS}-${ARCH}${NC}"
+        echo -e "${RED}Error: No binary found for ${platform_suffix}${NC}"
         echo -e "${YELLOW}Available binaries:${NC}"
-        grep -o "\"name\":\"[^\"]*\"" "${TEMP_DIR}/release.json" | cut -d'"' -f4 | grep -E "(linux|macos)" || echo "  None found"
+        grep -o '"name":"[^"]*"' "${TEMP_DIR}/release.json" | cut -d'"' -f4 | grep -E "\.tar\.gz$" || echo "  None found"
         exit 1
     fi
 
@@ -113,7 +112,7 @@ install_binary() {
 create_systemd_service() {
     echo -e "${YELLOW}Creating systemd service...${NC}"
 
-    sudo tee /etc/systemd/system/grid-node.service > /dev/null << EOF
+    sudo tee /etc/systemd/system/grid-node.service > /dev/null << SVCEOF
 [Unit]
 Description=The Grid - Proof of Network Node
 After=network.target
@@ -126,7 +125,7 @@ Restart=always
 RestartSec=5
 User=grid
 Group=grid
-ExecStart=${INSTALL_DIR}/grid-node --daemon --config-file=/var/lib/the-grid/config.json
+ExecStart=${INSTALL_DIR}/grid-node
 WorkingDirectory=/var/lib/the-grid
 StandardOutput=journal
 StandardError=journal
@@ -134,7 +133,7 @@ SyslogIdentifier=grid-node
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
     # Create user and directories
     if ! id grid &>/dev/null; then
@@ -157,18 +156,16 @@ EOF
 create_launchd_service() {
     echo -e "${YELLOW}Creating launchd service...${NC}"
 
-    sudo tee /Library/LaunchDaemons/grid.node.plist > /dev/null << EOF
+    sudo tee /Library/LaunchDaemons/com.xbigtech.grid-node.plist > /dev/null << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>grid.node</string>
+    <string>com.xbigtech.grid-node</string>
     <key>ProgramArguments</key>
     <array>
         <string>${INSTALL_DIR}/grid-node</string>
-        <string>--daemon</string>
-        <string>--config-file=/usr/local/var/the-grid/config.json</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/usr/local/var/the-grid</string>
@@ -177,28 +174,25 @@ create_launchd_service() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/usr/local/var/log/the-grid.log</string>
+    <string>/usr/local/var/log/grid-node.log</string>
     <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/the-grid.error.log</string>
+    <string>/usr/local/var/log/grid-node.error.log</string>
 </dict>
 </plist>
-EOF
+PLISTEOF
 
     # Create directories
     sudo mkdir -p /usr/local/var/the-grid
     sudo mkdir -p /usr/local/var/log
 
-    # Load service
-    sudo launchctl load /Library/LaunchDaemons/grid.node.plist
-
     echo -e "${GREEN}✓ Launchd service created${NC}"
-    echo -e "${YELLOW}  Start with: sudo launchctl start grid.node${NC}"
-    echo -e "${YELLOW}  Stop with: sudo launchctl stop grid.node${NC}"
+    echo -e "${YELLOW}  Load with: sudo launchctl load /Library/LaunchDaemons/com.xbigtech.grid-node.plist${NC}"
+    echo -e "${YELLOW}  Start with: sudo launchctl start com.xbigtech.grid-node${NC}"
 }
 
 # Main installation function
 main() {
-    echo -e "${YELLOW}This script will install The Grid blockchain launcher on your system.${NC}"
+    echo -e "${YELLOW}This script will install The Grid blockchain on your system.${NC}"
     echo ""
 
     # Check for required tools
@@ -210,8 +204,9 @@ main() {
     # Detect OS and architecture
     detect_os_arch
 
-    # Install launcher (which will manage node updates)
+    # Install both binaries
     install_binary "grid-launcher"
+    install_binary "grid-node"
 
     # Create system service
     case "$OS" in
@@ -237,12 +232,15 @@ main() {
     echo ""
     echo -e "${GREEN}🎉 The Grid installation complete!${NC}"
     echo ""
+    echo "Installed binaries:"
+    echo "  grid-launcher - Manages node updates automatically"
+    echo "  grid-node     - The blockchain node"
+    echo ""
     echo "Quick start:"
-    echo "  grid-launcher --help"
-    echo "  grid-launcher --install-only  # Download and install node without starting"
+    echo "  grid-node --help"
+    echo "  grid-node --version"
     echo ""
     echo "Documentation: https://github.com/X-Big-Tech/the-grid-releases"
-    echo "Support: bryan@xbigtech.com"
 }
 
 # Run main function
