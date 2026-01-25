@@ -21,6 +21,8 @@ curl -sSf https://raw.githubusercontent.com/X-Big-Tech/the-grid-releases/main/in
 
 ## Available Binaries
 
+### Standard builds (glibc, recommended for most servers)
+
 | Platform | Launcher | Node |
 |----------|----------|------|
 | Linux x86_64 | `grid-launcher-*-linux-amd64.tar.gz` | `grid-node-*-linux-amd64.tar.gz` |
@@ -28,6 +30,15 @@ curl -sSf https://raw.githubusercontent.com/X-Big-Tech/the-grid-releases/main/in
 | macOS Intel | `grid-launcher-*-macos-amd64.tar.gz` | `grid-node-*-macos-amd64.tar.gz` |
 | macOS ARM | `grid-launcher-*-macos-arm64.tar.gz` | `grid-node-*-macos-arm64.tar.gz` |
 | Windows x64 | `grid-launcher-*-windows-amd64.zip` | `grid-node-*-windows-amd64.zip` |
+
+### Static builds (musl, for Alpine/containers/older distros)
+
+| Platform | Launcher | Node |
+|----------|----------|------|
+| Linux x86_64 | `grid-launcher-*-linux-amd64-musl.tar.gz` | `grid-node-*-linux-amd64-musl.tar.gz` |
+| Linux ARM64 | `grid-launcher-*-linux-arm64-musl.tar.gz` | `grid-node-*-linux-arm64-musl.tar.gz` |
+
+> **Note**: musl builds are fully static binaries that run on any Linux distribution, including Alpine Linux and older systems. They use the mimalloc allocator for optimal performance.
 
 ---
 
