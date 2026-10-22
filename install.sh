@@ -1,247 +1,317 @@
-#!/bin/bash
+#!/bin/sh
 
 # The Grid Installation Script
 # Author: Bryan Campbell <bryan@xbigtech.com>
+#
+# Installs the `grid` CLI and `grid-launcher` from the latest GitHub
+# release, verifies every download against the release SHA256SUMS, then
+# runs `grid-launcher install` to fetch the matching grid-node binary.
+#
+# Usage:
+#   curl -sSf https://raw.githubusercontent.com/X-Big-Tech/the-grid-releases/main/install.sh | sh
+#   sh install.sh [--prefix <dir>]
+#
+# Options:
+#   --prefix <dir>        Install binaries into <dir> (default: /usr/local/bin)
+#
+# Environment:
+#   GRID_INSTALL_PREFIX   Same as --prefix (the flag wins when both are set)
+#
+# This script is strictly non-interactive: it never prompts, so it behaves
+# identically under `curl | sh` (where stdin is the pipe) and in a terminal.
+# It does not create system services; the closing summary prints the
+# `grid-launcher service install` command for operators who want one.
 
-set -e
+set -eu
 
-echo "🌐 The Grid - Proof of Network Installation"
-echo "=========================================="
-echo ""
+RELEASES_REPO="X-Big-Tech/the-grid-releases"
+RELEASE_API_URL="https://api.github.com/repos/${RELEASES_REPO}/releases/latest"
+DEFAULT_INSTALL_DIR="/usr/local/bin"
+FALLBACK_INSTALL_DIR="${HOME}/.local/bin"
 
-# Configuration - Using public releases repo
-REPO_URL="https://api.github.com/repos/X-Big-Tech/the-grid-releases/releases/latest"
-INSTALL_DIR="/usr/local/bin"
+# Clean the staging directory on every exit path; signal traps exit so
+# the EXIT trap fires instead of the script continuing without TEMP_DIR.
 TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Colors only when stdout is a terminal (escape codes would pollute logs)
+if [ -t 1 ]; then
+    RED=$(printf '\033[0;31m')
+    GREEN=$(printf '\033[0;32m')
+    YELLOW=$(printf '\033[1;33m')
+    NC=$(printf '\033[0m')
+else
+    RED=""
+    GREEN=""
+    YELLOW=""
+    NC=""
+fi
 
-# Detect OS and architecture
-detect_os_arch() {
-    OS=""
-    ARCH=""
+info() { printf '%s\n' "$1"; }
+ok()   { printf '%s%s%s\n' "$GREEN" "$1" "$NC"; }
+warn() { printf '%s%s%s\n' "$YELLOW" "$1" "$NC"; }
+fail() {
+    printf '%sError: %s%s\n' "$RED" "$1" "$NC" >&2
+    exit 1
+}
 
-    case "$(uname -s)" in
-        Darwin)
-            OS="macos"
+usage() {
+    cat << 'USAGE'
+The Grid installer
+
+Usage:
+  install.sh [--prefix <dir>]
+
+Options:
+  --prefix <dir>   Install binaries into <dir> (default: /usr/local/bin)
+  -h, --help       Show this help
+
+Environment:
+  GRID_INSTALL_PREFIX   Same as --prefix (the flag wins when both are set)
+USAGE
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+INSTALL_DIR="${GRID_INSTALL_PREFIX:-}"
+EXPLICIT_PREFIX=""
+if [ -n "$INSTALL_DIR" ]; then
+    EXPLICIT_PREFIX="1"
+fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --prefix)
+            [ $# -ge 2 ] || fail "--prefix requires a directory argument"
+            INSTALL_DIR="$2"
+            EXPLICIT_PREFIX="1"
+            shift 2
             ;;
-        Linux)
-            OS="linux"
+        --prefix=*)
+            INSTALL_DIR="${1#--prefix=}"
+            EXPLICIT_PREFIX="1"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
             ;;
         *)
-            echo -e "${RED}Error: Unsupported operating system $(uname -s)${NC}"
-            echo -e "${YELLOW}Windows users: Download from https://github.com/X-Big-Tech/the-grid-releases/releases${NC}"
-            exit 1
+            usage >&2
+            fail "Unknown option: $1"
+            ;;
+    esac
+done
+
+if [ -z "$INSTALL_DIR" ]; then
+    INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+
+detect_os_arch() {
+    case "$(uname -s)" in
+        Darwin) OS="macos" ;;
+        Linux)  OS="linux" ;;
+        *)
+            fail "Unsupported operating system: $(uname -s). Download binaries manually from https://github.com/${RELEASES_REPO}/releases"
             ;;
     esac
 
     case "$(uname -m)" in
-        x86_64)
-            ARCH="amd64"
-            ;;
-        arm64|aarch64)
-            ARCH="arm64"
-            ;;
+        x86_64)        ARCH="amd64" ;;
+        arm64|aarch64) ARCH="arm64" ;;
         *)
-            echo -e "${RED}Error: Unsupported architecture $(uname -m)${NC}"
-            exit 1
+            fail "Unsupported architecture: $(uname -m)"
             ;;
     esac
 
-    echo -e "${GREEN}Detected: ${OS}-${ARCH}${NC}"
+    # An x86_64 shell on Apple Silicon means the shell runs under Rosetta
+    # translation; the machine itself is arm64, so install native binaries.
+    if [ "$OS" = "macos" ] && [ "$ARCH" = "amd64" ] && \
+       [ "$(sysctl -in sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+        ARCH="arm64"
+        info "Detected Rosetta translation (x86_64 shell on Apple Silicon); installing native arm64 binaries."
+    fi
+
+    ok "Detected platform: ${OS}-${ARCH}"
 }
 
-# Download and install binary
-install_binary() {
-    local binary_name="$1"
-    local platform_suffix="${OS}-${ARCH}"
+# ---------------------------------------------------------------------------
+# Release metadata + downloads
+# ---------------------------------------------------------------------------
 
-    echo -e "${YELLOW}Downloading ${binary_name}...${NC}"
-
-    # Get latest release info
-    if ! curl -s "$REPO_URL" -o "${TEMP_DIR}/release.json"; then
-        echo -e "${RED}Error: Failed to fetch release information${NC}"
-        exit 1
+fetch_release_metadata() {
+    info "Fetching latest release metadata..."
+    if ! curl -fsSL --max-time 60 "$RELEASE_API_URL" -o "${TEMP_DIR}/release.json"; then
+        printf '%s\n' "Could not fetch release information from ${RELEASE_API_URL}." >&2
+        printf '%s\n' "If no release has been published yet, build from source instead:" >&2
+        printf '%s\n' "  git clone https://github.com/X-Big-Tech/the-grid.git" >&2
+        printf '%s\n' "  cd the-grid" >&2
+        printf '%s\n' "  cargo build --release --bin grid --bin grid-launcher --bin grid-node" >&2
+        fail "Failed to fetch release information"
     fi
 
-    # Find download URL matching pattern: grid-launcher-VERSION-linux-amd64.tar.gz
-    local download_url
-    download_url=$(grep "browser_download_url" "${TEMP_DIR}/release.json" | \
-                   grep "${binary_name}-.*-${platform_suffix}.tar.gz" | \
-                   cut -d'"' -f4 | head -1)
-
-    if [ -z "$download_url" ]; then
-        echo -e "${RED}Error: No binary found for ${platform_suffix}${NC}"
-        echo -e "${YELLOW}Available binaries:${NC}"
-        grep -o '"name":"[^"]*"' "${TEMP_DIR}/release.json" | cut -d'"' -f4 | grep -E "\.tar\.gz$" || echo "  None found"
-        exit 1
-    fi
-
-    # Download binary archive
-    echo "  Downloading from: ${download_url}"
-    if ! curl -L "$download_url" -o "${TEMP_DIR}/${binary_name}.tar.gz"; then
-        echo -e "${RED}Error: Failed to download ${binary_name}${NC}"
-        exit 1
-    fi
-
-    # Extract binary from archive
-    echo "  Extracting ${binary_name}..."
-    if ! tar -xzf "${TEMP_DIR}/${binary_name}.tar.gz" -C "${TEMP_DIR}/"; then
-        echo -e "${RED}Error: Failed to extract ${binary_name}${NC}"
-        exit 1
-    fi
-
-    # Make executable
-    chmod +x "${TEMP_DIR}/${binary_name}"
-
-    echo "  Installing to ${INSTALL_DIR}/${binary_name}"
-    if ! sudo cp "${TEMP_DIR}/${binary_name}" "${INSTALL_DIR}/${binary_name}"; then
-        echo -e "${RED}Error: Failed to install ${binary_name}${NC}"
-        echo "  Try running with sudo or check permissions"
-        exit 1
-    fi
-
-    echo -e "${GREEN}✓ ${binary_name} installed successfully${NC}"
+    VERSION=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
+        "${TEMP_DIR}/release.json" | head -1)
+    [ -n "$VERSION" ] || fail "Could not parse a release version from ${RELEASE_API_URL}"
+    ok "Latest release: v${VERSION}"
 }
 
-# Create systemd service (Linux)
-create_systemd_service() {
-    echo -e "${YELLOW}Creating systemd service...${NC}"
+# Print the download URL for an exact asset filename ($1), or nothing.
+asset_url() {
+    sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "${TEMP_DIR}/release.json" | grep "/$1\$" | head -1
+}
 
-    sudo tee /etc/systemd/system/grid-node.service > /dev/null << SVCEOF
-[Unit]
-Description=The Grid - Proof of Network Node
-After=network.target
-StartLimitBurst=5
-StartLimitIntervalSec=0
+# Download asset $1 into TEMP_DIR.
+download_asset() {
+    DOWNLOAD_URL=$(asset_url "$1")
+    [ -n "$DOWNLOAD_URL" ] || fail "Release v${VERSION} has no asset named $1"
+    info "  Downloading $1"
+    curl -fSL --progress-bar --max-time 600 "$DOWNLOAD_URL" -o "${TEMP_DIR}/$1" || \
+        fail "Failed to download $1"
+}
 
-[Service]
-Type=simple
-Restart=always
-RestartSec=5
-User=grid
-Group=grid
-ExecStart=${INSTALL_DIR}/grid-node
-WorkingDirectory=/var/lib/the-grid
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=grid-node
+# ---------------------------------------------------------------------------
+# Checksum verification
+# ---------------------------------------------------------------------------
 
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+sha256_of() {
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum < "$1" | awk '{print $1}'
+    elif command -v shasum > /dev/null 2>&1; then
+        shasum -a 256 < "$1" | awk '{print $1}'
+    else
+        fail "Neither sha256sum nor shasum is available; cannot verify downloads"
+    fi
+}
 
-    # Create user and directories
-    if ! id grid &>/dev/null; then
-        sudo useradd -r -s /bin/false grid
+# Verify TEMP_DIR/$1 against the entry for $1 in TEMP_DIR/SHA256SUMS.
+# SHA256SUMS lines are "<hash>  <name>"; tolerate a "./" name prefix.
+verify_asset() {
+    EXPECTED=$(awk -v f="$1" '$2 == f || $2 == "./" f {print $1; exit}' \
+        "${TEMP_DIR}/SHA256SUMS")
+    [ -n "$EXPECTED" ] || fail "SHA256SUMS has no entry for $1"
+    ACTUAL=$(sha256_of "${TEMP_DIR}/$1")
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        fail "SHA256 mismatch for $1 (expected ${EXPECTED}, got ${ACTUAL})"
+    fi
+    ok "  Verified $1 (sha256 OK)"
+}
+
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
+
+path_contains() {
+    case ":${PATH}:" in
+        *":$1:"*) return 0 ;;
+        *)        return 1 ;;
+    esac
+}
+
+# Make INSTALL_DIR exist and decide whether copies need sudo. When the
+# default prefix is unwritable and sudo is unavailable (or fails, e.g. no
+# tty to prompt on), fall back to ~/.local/bin. An explicit prefix never
+# silently falls back: the user asked for that exact directory.
+prepare_install_dir() {
+    SUDO=""
+    if mkdir -p "$INSTALL_DIR" 2> /dev/null && [ -w "$INSTALL_DIR" ]; then
+        return 0
     fi
 
-    sudo mkdir -p /var/lib/the-grid
-    sudo chown grid:grid /var/lib/the-grid
+    if command -v sudo > /dev/null 2>&1; then
+        warn "${INSTALL_DIR} is not writable; using sudo for directory creation and binary copies."
+        if sudo mkdir -p "$INSTALL_DIR" 2> /dev/null; then
+            SUDO="sudo"
+            return 0
+        fi
+    fi
 
-    # Enable service
-    sudo systemctl daemon-reload
-    sudo systemctl enable grid-node
+    if [ -n "$EXPLICIT_PREFIX" ]; then
+        fail "Cannot write to ${INSTALL_DIR} and sudo is unavailable. Re-run with a writable --prefix (or GRID_INSTALL_PREFIX)."
+    fi
 
-    echo -e "${GREEN}✓ Systemd service created${NC}"
-    echo -e "${YELLOW}  Start with: sudo systemctl start grid-node${NC}"
-    echo -e "${YELLOW}  Status: sudo systemctl status grid-node${NC}"
+    warn "Cannot write to ${INSTALL_DIR} without sudo; falling back to ${FALLBACK_INSTALL_DIR}"
+    INSTALL_DIR="$FALLBACK_INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR" || fail "Failed to create ${INSTALL_DIR}"
 }
 
-# Create launchd service (macOS)
-create_launchd_service() {
-    echo -e "${YELLOW}Creating launchd service...${NC}"
-
-    sudo tee /Library/LaunchDaemons/com.xbigtech.grid-node.plist > /dev/null << PLISTEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.xbigtech.grid-node</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${INSTALL_DIR}/grid-node</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>/usr/local/var/the-grid</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/usr/local/var/log/grid-node.log</string>
-    <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/grid-node.error.log</string>
-</dict>
-</plist>
-PLISTEOF
-
-    # Create directories
-    sudo mkdir -p /usr/local/var/the-grid
-    sudo mkdir -p /usr/local/var/log
-
-    echo -e "${GREEN}✓ Launchd service created${NC}"
-    echo -e "${YELLOW}  Load with: sudo launchctl load /Library/LaunchDaemons/com.xbigtech.grid-node.plist${NC}"
-    echo -e "${YELLOW}  Start with: sudo launchctl start com.xbigtech.grid-node${NC}"
+# Extract binary $2 from tarball TEMP_DIR/$1 and copy it into INSTALL_DIR.
+install_binary_from_tarball() {
+    tar -xzf "${TEMP_DIR}/$1" -C "$TEMP_DIR" "$2" || \
+        fail "Failed to extract $2 from $1"
+    chmod +x "${TEMP_DIR}/$2"
+    info "  Installing $2 -> ${INSTALL_DIR}/$2"
+    $SUDO cp "${TEMP_DIR}/$2" "${INSTALL_DIR}/$2" || \
+        fail "Failed to install $2 to ${INSTALL_DIR}"
 }
 
-# Main installation function
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 main() {
-    echo -e "${YELLOW}This script will install The Grid blockchain on your system.${NC}"
-    echo ""
+    info "The Grid - Proof of Network Installation"
+    info "=========================================="
+    info ""
 
-    # Check for required tools
-    if ! command -v curl &> /dev/null; then
-        echo -e "${RED}Error: curl is required but not installed${NC}"
+    command -v curl > /dev/null 2>&1 || fail "curl is required but not installed"
+    command -v tar > /dev/null 2>&1 || fail "tar is required but not installed"
+
+    detect_os_arch
+    fetch_release_metadata
+
+    # SHA256SUMS first: without it, nothing else can be verified.
+    download_asset "SHA256SUMS"
+
+    CLI_ASSET="grid-cli-${VERSION}-${OS}-${ARCH}.tar.gz"
+    LAUNCHER_ASSET="grid-launcher-${VERSION}-${OS}-${ARCH}.tar.gz"
+
+    download_asset "$CLI_ASSET"
+    verify_asset "$CLI_ASSET"
+    download_asset "$LAUNCHER_ASSET"
+    verify_asset "$LAUNCHER_ASSET"
+
+    prepare_install_dir
+    install_binary_from_tarball "$CLI_ASSET" "grid"
+    install_binary_from_tarball "$LAUNCHER_ASSET" "grid-launcher"
+
+    if ! path_contains "$INSTALL_DIR"; then
+        warn "NOTE: ${INSTALL_DIR} is not on your PATH."
+        info "  Add it in your shell profile (~/.profile, ~/.bashrc, or ~/.zshrc):"
+        info "    export PATH=\"${INSTALL_DIR}:\$PATH\""
+    fi
+
+    # grid-launcher install downloads and installs the matching grid-node
+    # binary, then exits (no service is created and nothing is started).
+    info ""
+    info "Installing grid-node via grid-launcher..."
+    export GRID_INSTALL_PREFIX="$INSTALL_DIR"
+    if ! "${INSTALL_DIR}/grid-launcher" install; then
+        printf '%s\n' "${RED}Error: grid-node installation failed.${NC}" >&2
+        printf '%s\n' "Fix the issue above, then re-run just this step with:" >&2
+        printf '%s\n' "  ${INSTALL_DIR}/grid-launcher install" >&2
         exit 1
     fi
 
-    # Detect OS and architecture
-    detect_os_arch
-
-    # Install both binaries
-    install_binary "grid-launcher"
-    install_binary "grid-node"
-
-    # Create system service
-    case "$OS" in
-        linux)
-            read -p "Create systemd service? (y/n) " -n 1 -r
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                create_systemd_service
-            fi
-            ;;
-        macos)
-            read -p "Create launchd service? (y/n) " -n 1 -r
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                create_launchd_service
-            fi
-            ;;
-    esac
-
-    # Cleanup
-    rm -rf "$TEMP_DIR"
-
-    echo ""
-    echo -e "${GREEN}🎉 The Grid installation complete!${NC}"
-    echo ""
-    echo "Installed binaries:"
-    echo "  grid-launcher - Manages node updates automatically"
-    echo "  grid-node     - The blockchain node"
-    echo ""
-    echo "Quick start:"
-    echo "  grid-node --help"
-    echo "  grid-node --version"
-    echo ""
-    echo "Documentation: https://github.com/X-Big-Tech/the-grid-releases"
+    info ""
+    ok "The Grid installation complete: grid, grid-launcher, grid-node"
+    info ""
+    info "Optional system service (runs grid-node under systemd/launchd):"
+    info "  grid-launcher service install"
+    info ""
+    info "Documentation: https://github.com/X-Big-Tech/the-grid/docs"
+    info "Support: bryan@xbigtech.com"
+    info ""
+    info "Next: grid onboard   (guided operator onboarding)"
 }
 
-# Run main function
-main "$@"
+main
