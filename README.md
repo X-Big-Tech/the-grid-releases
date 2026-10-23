@@ -1,278 +1,105 @@
-# The Grid - Public Releases
+# The Grid — Releases
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/X-Big-Tech/the-grid-releases)](https://github.com/X-Big-Tech/the-grid-releases/releases/latest)
 
-Official releases for **The Grid** - a Proof of Network (PoN) blockchain that validates nodes based on network topology rather than computational power or wealth.
+Builds of **The Grid**: `grid-node` (the node), `grid-launcher` (installs, updates,
+pairs and runs the node as a service) and `grid` (the command-line tool). This repository holds
+the releases and the install scripts; it is published from the main repository on every release,
+so what is here matches the latest release.
 
-## Quick Start
+## Install
 
-### Linux / macOS
+### Linux and macOS
 
 ```bash
 curl -sSf https://raw.githubusercontent.com/X-Big-Tech/the-grid-releases/main/install.sh | sh
 ```
 
+The script downloads `grid-launcher` for your system, checks it against the release's
+`SHA256SUMS`, and installs it into `/usr/local/bin`; `grid-launcher install` then fetches and
+checks `grid-node` and `grid` from the same release. When `/usr/local/bin` needs root, sudo asks
+for your password once. Without sudo it installs into `~/.local/bin` and adds that directory to
+your shell profile. Options: `--prefix <dir>`, `--no-modify-path`. Read it first:
+[install.sh](install.sh).
+
 ### Windows
 
-1. Download the latest `.zip` files from [Releases](https://github.com/X-Big-Tech/the-grid-releases/releases)
-2. Extract to a folder (e.g., `C:\grid\`)
-3. Add to PATH or run directly from the folder
+Windows builds (`.zip`) are published with every release. A Windows installer and automatic
+Windows service setup arrive in the next release; until then, pairing a Windows machine is not
+supported.
 
-## Available Binaries
+## Pair a machine with your account
 
-### Standard builds (glibc, recommended for most servers)
+Open **Add a machine** on the network's website (for the Grid's own network,
+[gridian.io/network/nodes/pair](https://gridian.io/network/nodes/pair)). It shows the command for
+your system:
 
-| Platform | Launcher | Node |
-|----------|----------|------|
-| Linux x86_64 | `grid-launcher-*-linux-amd64.tar.gz` | `grid-node-*-linux-amd64.tar.gz` |
-| Linux ARM64 | `grid-launcher-*-linux-arm64.tar.gz` | `grid-node-*-linux-arm64.tar.gz` |
-| macOS Intel | `grid-launcher-*-macos-amd64.tar.gz` | `grid-node-*-macos-amd64.tar.gz` |
-| macOS ARM | `grid-launcher-*-macos-arm64.tar.gz` | `grid-node-*-macos-arm64.tar.gz` |
-| Windows x64 | `grid-launcher-*-windows-amd64.zip` | `grid-node-*-windows-amd64.zip` |
+| System  | Command | Why |
+|---------|---------|-----|
+| Linux   | `sudo grid-launcher pair --web-origin https://gridian.io` | The node runs as a systemd service, which needs root to install. The node itself runs as you. |
+| macOS   | `grid-launcher pair --web-origin https://gridian.io` | The node runs as your own LaunchAgent. Add `--system` (with `sudo`) for a LaunchDaemon that survives logout. |
 
-### Static builds (musl, for Alpine/containers/older distros)
+The launcher asks the website which chain it pairs onto, downloads that chain's genesis from
+`https://gridprotocol.io/network/<chain-id>.json` and refuses it unless its hash is the chain's,
+then shows an eight-character code, three check words and a QR code. Enter the code on the
+website (or scan the QR code), check the three words match, and grant the machine on one of your
+accounts. Back on the machine, confirm the account; the launcher configures the node, installs
+its service, starts it and waits until the node sees its grant on chain.
 
-| Platform | Launcher | Node |
-|----------|----------|------|
-| Linux x86_64 | `grid-launcher-*-linux-amd64-musl.tar.gz` | `grid-node-*-linux-amd64-musl.tar.gz` |
-| Linux ARM64 | `grid-launcher-*-linux-arm64-musl.tar.gz` | `grid-node-*-linux-arm64-musl.tar.gz` |
+## Downloads
 
-> **Note**: musl builds are fully static binaries that run on any Linux distribution, including Alpine Linux and older systems. They use the mimalloc allocator for optimal performance.
+Every release has `grid-launcher`, `grid-node` and `grid` (published as `grid-cli-*`) for each
+platform, plus `SHA256SUMS`:
 
----
+| Platform | Archives |
+|----------|----------|
+| Linux x86_64 (glibc 2.35+: Ubuntu 22.04+, Debian 12+, RHEL 9+) | `grid-{launcher,node,cli}-<version>-linux-amd64.tar.gz` |
+| Linux ARM64 (glibc 2.35+) | `grid-{launcher,node,cli}-<version>-linux-arm64.tar.gz` |
+| Linux x86_64, static (musl: any distribution, Alpine, containers) | `grid-{launcher,node,cli}-<version>-linux-amd64-musl.tar.gz` |
+| Linux ARM64, static (musl) | `grid-{launcher,node,cli}-<version>-linux-arm64-musl.tar.gz` |
+| macOS Apple silicon | `grid-{launcher,node,cli}-<version>-macos-arm64.tar.gz` |
+| macOS Intel | `grid-{launcher,node,cli}-<version>-macos-amd64.tar.gz` |
+| Windows x86_64 | `grid-{launcher,node,cli}-<version>-windows-amd64.zip` |
 
-## Grid Node
+Every binary links only the operating system's own libraries.
 
-The core blockchain node. Run this to participate in the network.
-
-### Basic Usage
-
-```bash
-# Start node with defaults
-grid-node
-
-# Check version
-grid-node --version
-
-# Show help
-grid-node --help
-```
-
-### Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--data-dir` | `~/.grid-node` | Data directory for blockchain state |
-| `--listen-port` | `8333` | UDP port for P2P connections |
-| `--api-port` | `8080` | HTTP API port |
-| `--node-type` | `validator` | Node type: `genesis` or `validator` |
-| `--node-name` | `node` | Human-readable name for logs |
-| `--log-level` | `info` | Log verbosity: `error`, `warn`, `info`, `debug`, `trace` |
-| `--config-file` | - | Path to JSON configuration file |
-
-### Node Key Management
+Check downloads before using them:
 
 ```bash
-# Auto-generate key (stored in ~/.grid-node/node_key.json)
-grid-node
-
-# Use specific key file
-grid-node --node-key-file /path/to/key.json
-
-# Provide key directly (64 hex chars)
-grid-node --node-key <hex-encoded-ed25519-secret>
-
-# Reset and generate new key
-grid-node --reset-key
+sha256sum -c --ignore-missing SHA256SUMS            # Linux: checks every file you downloaded
+shasum -a 256 grid-launcher-<version>-macos-arm64.tar.gz   # macOS: compare with its line in SHA256SUMS
 ```
 
-### Example: Running a Validator
+## The launcher
 
-```bash
-grid-node \
-  --data-dir /var/lib/grid \
-  --listen-port 8333 \
-  --api-port 8080 \
-  --node-name my-validator \
-  --log-level info
-```
+| Command | What it does |
+|---------|--------------|
+| `grid-launcher install [--install-dir DIR] [--version V]` | Download and install `grid-node` and `grid`, checked against `SHA256SUMS`. |
+| `grid-launcher update` | Update the installed binaries. Never restarts running services; it prints the restart command for each. |
+| `grid-launcher pair --web-origin URL` | Pair this machine with an account through a network's website (above). |
+| `grid-launcher service install --config <node.json>` | Run a node configured by `grid onboard` as a service (systemd or launchd). |
+| `grid-launcher service uninstall [--name N]` | Stop and remove a node service. |
+| `grid-launcher uninstall` | Remove the binaries. Refused while a node service still runs them. Keys and configs under `~/.grid` are kept. |
+| `grid-launcher network list` / `network add` / `network use` | The networks this machine pairs through. |
+| `grid-launcher agent install` | The background agent that applies configuration the node's owners publish and rolls out signed upgrades. |
 
-### Ports
+On Linux, commands that install a system service run under sudo. Name the launcher by its path
+there if it is in `~/.local/bin`, which sudo's `PATH` leaves out:
+`sudo "$(command -v grid-launcher)" …`.
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 8333 | UDP | P2P QUIC transport (required) |
-| 8080 | TCP | HTTP API (optional) |
+## Operators
 
-Ensure UDP port 8333 is open in your firewall for P2P connectivity.
+`grid onboard` sets up a node step by step: keys, operator account, genesis, configuration and
+start. See `grid onboard --help`, and `grid-node --help` for the node's own options.
 
----
-
-## Grid Launcher
-
-Manages node installation and updates automatically.
-
-### Usage
-
-```bash
-# Install and start node
-grid-launcher
-
-# Install only (don't start service)
-grid-launcher --install-only
-
-# Check for updates
-grid-launcher --update
-
-# Run as daemon
-grid-launcher --daemon
-
-# Use custom config
-grid-launcher --config /path/to/config.json
-```
-
----
-
-## Verification
-
-Each release includes `SHA256SUMS` for integrity verification:
-
-```bash
-# Linux/macOS - verify all files
-cd ~/Downloads
-sha256sum -c SHA256SUMS
-
-# Verify single file
-sha256sum grid-node-*-linux-amd64.tar.gz
-```
-
----
-
-## System Requirements
-
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| **OS** | Linux (Ubuntu 20.04+), macOS 11+, Windows 10+ | Ubuntu 22.04 LTS |
-| **CPU** | 2 cores | 4+ cores |
-| **RAM** | 2 GB | 4+ GB |
-| **Disk** | 10 GB | 50+ GB SSD |
-| **Network** | 10 Mbps | 100+ Mbps |
-
----
-
-## Running as a Service
-
-### Linux (systemd)
-
-```bash
-# Create service file
-sudo tee /etc/systemd/system/grid-node.service << 'SVC'
-[Unit]
-Description=The Grid Node
-After=network.target
-
-[Service]
-Type=simple
-User=grid
-ExecStart=/usr/local/bin/grid-node --data-dir /var/lib/grid
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-SVC
-
-# Enable and start
-sudo useradd -r -s /bin/false grid
-sudo mkdir -p /var/lib/grid
-sudo chown grid:grid /var/lib/grid
-sudo systemctl daemon-reload
-sudo systemctl enable grid-node
-sudo systemctl start grid-node
-
-# Check status
-sudo systemctl status grid-node
-journalctl -u grid-node -f
-```
-
-### macOS (launchd)
-
-```bash
-# Create plist
-sudo tee /Library/LaunchDaemons/com.xbigtech.grid-node.plist << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.xbigtech.grid-node</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/grid-node</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-PLIST
-
-# Load service
-sudo launchctl load /Library/LaunchDaemons/com.xbigtech.grid-node.plist
-```
-
-### Windows (NSSM)
-
-1. Download [NSSM](https://nssm.cc/download)
-2. Install as service:
-```powershell
-nssm install GridNode C:\grid\grid-node.exe
-nssm set GridNode AppDirectory C:\grid
-nssm start GridNode
-```
-
----
-
-## Troubleshooting
-
-### Node won't start
-
-```bash
-# Check if port is in use
-lsof -i :8333
-netstat -tuln | grep 8333
-
-# Check logs
-grid-node --log-level debug
-```
-
-### Connection issues
-
-- Ensure UDP port 8333 is open (firewall, router)
-- Check internet connectivity
-- Verify you're using the correct network (mainnet/testnet)
-
-### Permission denied
-
-```bash
-# Linux/macOS - fix permissions
-sudo chown -R $USER ~/.grid-node
-chmod 700 ~/.grid-node
-```
-
----
+The node uses UDP port 8333 for peer traffic (QUIC); open it in your firewall. Validators also
+use TCP port 8335 for consensus.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/X-Big-Tech/the-grid-releases/issues)
-- **Email**: bryan@xbigtech.com
+- Issues: [GitHub issues](https://github.com/X-Big-Tech/the-grid-releases/issues)
+- Email: bryan@xbigtech.com
 
 ## License
 
-Apache 2.0 - See [LICENSE](LICENSE)
-
----
-
-*Copyright 2024-2025 Bryan Campbell / X-Big-Tech*
+Apache 2.0. See [LICENSE](LICENSE).
