@@ -40,7 +40,7 @@ your system:
 | macOS   | `grid-launcher pair --web-origin https://gridian.io` | The node runs as your own LaunchAgent. Add `--system` (with `sudo`) for a LaunchDaemon that survives logout. |
 
 The launcher asks the website which chain it pairs onto, downloads that chain's genesis from
-`https://gridprotocol.io/network/<chain-id>.json` and refuses it unless its hash is the chain's,
+`https://gridprotocol.io/network/<chain-id>/genesis.json` and refuses it unless its hash is the chain's,
 then shows an eight-character code, three check words and a QR code. Enter the code on the
 website (or scan the QR code), check the three words match, and grant the machine on one of your
 accounts. Back on the machine, confirm the account; the launcher configures the node, installs
