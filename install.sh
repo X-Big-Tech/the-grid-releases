@@ -155,7 +155,40 @@ detect_os_arch() {
         info "Detected Rosetta translation (x86_64 shell on Apple Silicon); installing native arm64 binaries."
     fi
 
+    # The glibc builds need glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+,
+    # RHEL 9+). An older glibc, or a C library that is not glibc (Alpine),
+    # gets the static musl builds every release also publishes; the launcher
+    # then fetches the same kind of build for the node and the CLI.
+    if [ "$OS" = "linux" ]; then
+        GLIBC_VERSION=$(glibc_version)
+        if [ -z "$GLIBC_VERSION" ] || version_below "$GLIBC_VERSION" 2 35; then
+            ARCH="${ARCH}-musl"
+            info "glibc ${GLIBC_VERSION:-not found} (the standard builds need 2.35+): installing the static builds."
+        fi
+    fi
+
     ok "Detected platform: ${OS}-${ARCH}"
+}
+
+# The running glibc's version (MAJOR.MINOR), or nothing when the C library is
+# not glibc.
+glibc_version() {
+    V=$(getconf GNU_LIBC_VERSION 2> /dev/null | awk '{print $2}')
+    if [ -z "$V" ]; then
+        V=$(ldd --version 2>&1 | head -1 | grep -i 'glibc\|gnu libc' | grep -oE '[0-9]+\.[0-9]+' | tail -1)
+    fi
+    printf '%s' "$V"
+}
+
+# True when version $1 (MAJOR.MINOR) is below MAJOR $2, MINOR $3.
+version_below() {
+    MAJOR=${1%%.*}
+    MINOR=${1#*.}
+    MINOR=${MINOR%%.*}
+    case "$MAJOR$MINOR" in
+        *[!0-9]*|'') return 0 ;;
+    esac
+    [ "$MAJOR" -lt "$2" ] || { [ "$MAJOR" -eq "$2" ] && [ "$MINOR" -lt "$3" ]; }
 }
 
 # ---------------------------------------------------------------------------
