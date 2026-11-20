@@ -22,11 +22,36 @@ for your password once. Without sudo it installs into `~/.local/bin` and adds th
 your shell profile. Options: `--prefix <dir>`, `--no-modify-path`. Read it first:
 [install.sh](install.sh).
 
-### Windows
+### Windows 10 and 11
 
-Windows builds (`.zip`) are published with every release. A Windows installer and automatic
-Windows service setup arrive in the next release; until then, pairing a Windows machine is not
-supported.
+**Before you install, check Smart App Control.** Windows 11's Smart App Control blocks programs
+that are not signed, with no exception for a single program, and the Grid's Windows programs are
+not signed yet.
+
+1. Open **Windows Security** > **App & browser control** > **Smart App Control settings**. If there
+   is no such section (Windows 10), there is nothing to change.
+2. If it says **Off**, you are ready. If it says **On** or **Evaluation**, first install any waiting
+   Windows updates (so it can be turned back on later without reinstalling Windows), then choose
+   **Off**. Evaluation counts too, because Windows can turn it on by itself.
+3. Leave it off while the machine runs a node: it checks programs as they start, so turning it back
+   on stops the node the next time it starts.
+
+If Windows says **Windows protected your PC** for a program you downloaded in a browser, choose
+**More info**, check the app name, then **Run anyway**.
+
+Then, in an **administrator PowerShell** (right-click Windows PowerShell or Terminal, then **Run as
+administrator**):
+
+```powershell
+irm https://raw.githubusercontent.com/X-Big-Tech/the-grid-releases/main/install.ps1 | iex
+```
+
+The script downloads `grid-launcher` for Windows, checks it against the release's `SHA256SUMS`
+with `Get-FileHash`, and installs it into `%ProgramFiles%\Grid`, which only administrators can
+change, since the node's service runs from there. `grid-launcher install` then fetches and checks
+`grid-node` and `grid` from the same release. The folder is added to the machine `PATH` and to the
+open window's, so the next command works there at once. Environment: `GRID_NO_MODIFY_PATH=1`.
+Read it first: [install.ps1](install.ps1).
 
 ## Pair a machine with your account
 
@@ -38,6 +63,7 @@ your system:
 |---------|---------|-----|
 | Linux   | `sudo grid-launcher pair --web-origin https://gridian.io` | The node runs as a systemd service, which needs root to install. The node itself runs as you. |
 | macOS   | `grid-launcher pair --web-origin https://gridian.io` | The node runs as your own LaunchAgent. Add `--system` (with `sudo`) for a LaunchDaemon that survives logout. |
+| Windows | `grid-launcher pair --web-origin https://gridian.io` in an administrator PowerShell | The node runs as a Windows service, which starts at boot and runs with no one signed in; registering one needs an administrator. The service runs under its own account, `NT SERVICE\grid-node-<name>`, which can change only the node's own folder. Its keys, config and data are in `%ProgramData%\Grid`, which only administrators and the node's service can change. The launcher also opens the node's ports in Windows Firewall. |
 
 The launcher asks the website which chain it pairs onto, downloads that chain's genesis from
 `https://gridprotocol.io/network/<chain-id>/genesis.json` and refuses it unless its hash is the chain's,
@@ -45,6 +71,12 @@ then shows an eight-character code, three check words and a QR code. Enter the c
 website (or scan the QR code), check the three words match, and grant the machine on one of your
 accounts. Back on the machine, confirm the account; the launcher configures the node, installs
 its service, starts it and waits until the node sees its grant on chain.
+
+By default the machine takes the recommended setup: every service that needs no stake and fits
+the machine, 80% of its free disk as storage, and its public address when it has one. Add
+`--wizard` to the command to choose each of those at prompts instead; each prompt offers the
+recommended answer, and Enter takes it. Either way, they can be changed later on the machine's
+page under Nodes.
 
 ## Downloads
 
@@ -68,6 +100,7 @@ Check downloads before using them:
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS            # Linux: checks every file you downloaded
 shasum -a 256 grid-launcher-<version>-macos-arm64.tar.gz   # macOS: compare with its line in SHA256SUMS
+# Windows (PowerShell): Get-FileHash grid-launcher-<version>-windows-amd64.zip, compared with its line
 ```
 
 ## The launcher
